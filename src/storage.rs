@@ -203,6 +203,7 @@ impl StorageManager {
         }
         if let Some(mut c) = t.child.take() {
             let _ = c.kill().await;
+            let _ = c.wait().await;
         }
     }
 
