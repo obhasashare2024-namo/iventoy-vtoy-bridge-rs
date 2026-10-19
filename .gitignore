@@ -1,1 +1,5 @@
 /target
+*.log
+*.bak
+.bak/
+dist/.bak/

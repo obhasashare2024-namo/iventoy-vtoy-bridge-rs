@@ -94,7 +94,7 @@ impl Default for Config {
             vtoy_dir: "/srv/vtoy/iso".into(),
             boot_mode: BootMode::Iscsi,
             tgt_base_tid: 100,
-            iqn_prefix: "iqn.2026.lan:vtoy".into(),
+            iqn_prefix: "iqn.2026-10.lan:vtoy".into(),
             nbd_base_port: 10810,
             vtoy_kernel_url: "http://${next-server}:16000/vtoy/vmlinuz".into(),
             vtoy_initrd_url: "http://${next-server}:16000/vtoy/initramfs.img".into(),

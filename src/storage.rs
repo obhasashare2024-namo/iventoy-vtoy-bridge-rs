@@ -24,6 +24,25 @@ pub fn sanitize_ipxe_key(key: &str) -> String {
     }
 }
 
+pub fn sanitize_iscsi_iqn_key(key: &str) -> String {
+    let clean: String = key
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if clean.is_empty() {
+        "item".into()
+    } else {
+        clean
+    }
+}
+
 pub fn sanitize_ipxe_text(text: &str) -> String {
     let clean: String = text
         .chars()
@@ -157,10 +176,15 @@ impl StorageManager {
         log(&format!("Exporting NBD on port {}: Backing={} (format={})", port, path, fmt_arg));
         let mut cmd = Command::new("qemu-nbd");
         cmd.arg("-t")
+            .arg("-e")
+            .arg("16")
             .arg("-p")
             .arg(port.to_string())
             .arg("-x")
             .arg("vtoy")
+            .arg("--cache=writeback")
+            .arg("--aio=threads")
+            .arg("--discard=unmap")
             .arg("-f")
             .arg(fmt_arg);
         cmd.arg(path);
@@ -260,12 +284,16 @@ impl StorageManager {
                 let fullpath = format!("{}/{}", vtoy_dir, filename);
                 let tid = self.alloc_tid().await;
                 let port = self.alloc_port().await;
-                let iqn = format!("{}:{}", iqn_prefix, sanitize_ipxe_key(&vtoy_id));
+                let iqn = format!("{}:{}", iqn_prefix, sanitize_iscsi_iqn_key(&vtoy_id));
                 let partitioned = has_partition_table(&fullpath).await;
                 
                 // Allow manual override from iventoy.json images config
                 let mut root_dev = if partitioned {
-                    "/dev/nbd0p2".to_string()
+                    if filename.contains("anitix") {
+                        "/dev/nbd0p3".to_string()
+                    } else {
+                        "/dev/nbd0p2".to_string()
+                    }
                 } else {
                     "/dev/nbd0".to_string()
                 };
@@ -303,14 +331,14 @@ impl StorageManager {
                 if is_win || boot_mode == BootMode::Iscsi {
                     self.export_iscsi(tid, &iqn, &fullpath).await;
                 }
-                if !is_win || boot_mode == BootMode::Nbd {
+                if !is_win {
                     child = self.export_nbd(port, &fullpath, fmt).await;
                 }
 
                 map.insert(vtoy_id.clone(), Target { info, child });
             } else {
                 let t = map.get_mut(&vtoy_id).unwrap();
-                if boot_mode == BootMode::Nbd || (!t.info.is_windows && t.child.is_some()) {
+                if !t.info.is_windows && (boot_mode == BootMode::Nbd || t.child.is_some()) {
                     let need_respawn = match t.child.as_mut() {
                         Some(c) => c.try_wait().ok().flatten().is_some(),
                         None => true,
@@ -454,13 +482,13 @@ impl StorageManager {
                 // Submenu Handler: iSCSI
                 let iqn = sanitize_ipxe_text(&info.iqn);
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Native iSCSI Target ({}) ...\nset root-path iscsi:${{next-server}}::::{}\nsanboot iscsi:${{next-server}}::::{} || goto boot_failed\n",
+                    ":{}\necho Booting {} via Native iSCSI Target ({}) ...\nset root-path iscsi:${{next-server}}:::1:{}\nsanboot iscsi:${{next-server}}:::1:{} || goto boot_failed\n",
                     iscsi_key, label, iqn, iqn, iqn
                 ));
 
                 // Submenu Handler: vtoyboot Hook
                 handlers.push(format!(
-                    ":{}\necho Booting {} via Ventoy NBD Hook (Port {}) ...\nkernel {} initrd=initramfs.img ip=dhcp nbdroot=${{next-server}} nbdport={} root={} rw quiet\ninitrd {}\nboot || goto boot_failed\n",
+                    ":{}\necho Booting {} via Ventoy NBD Hook (Port {}) ...\nkernel {} initrd=initramfs.img console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{next-server}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd {}\nboot || goto boot_failed\n",
                     vtoy_key, label, info.nbd_port, cfg.vtoy_kernel_url, info.nbd_port, info.root_dev, cfg.vtoy_initrd_url
                 ));
             } else if info.file.to_ascii_lowercase().ends_with(".iso") {
@@ -475,7 +503,7 @@ impl StorageManager {
                 vdisk_items.push(format!("item {} [{}] {}", item_key, info.format.to_uppercase(), label));
 
                 handlers.push(format!(
-                    ":{}\necho Booting {} via NBD (Port {}, Root {}) ...\nkernel {} initrd=initramfs.img ip=dhcp nbdroot=${{next-server}} nbdport={} root={} rw quiet\ninitrd {}\nboot || goto boot_failed\n",
+                    ":{}\necho Booting {} via NBD (Port {}, Root {}) ...\nkernel {} initrd=initramfs.img console=tty0 console=ttyS0,115200 ip=dhcp nbdroot=${{next-server}} nbdport={} nbdmaxpart=16 root={} rw nosplash verbose\ninitrd {}\nboot || goto boot_failed\n",
                     item_key, label, info.nbd_port, info.root_dev, cfg.vtoy_kernel_url, info.nbd_port, info.root_dev, cfg.vtoy_initrd_url
                 ));
             }
